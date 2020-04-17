@@ -1,22 +1,56 @@
 #include <Arduino.h>
 #include <Arduino_LSM9DS1.h>
 #include "BLESerial.h"
+#include <ArduinoBLE.h>
 #include "MadgwickAHRS.h"
+#include "INS.h"
+
 // time interval the characteristic gets updated with [ms]
-#define BLE_REFRESH_TIME 125
+#define BLE_REFRESH_TIME 60
 // Sample rate for the filter update [hz]
-#define AHRS_SAMPLE_RATE 60.0f
+#define AHRS_SAMPLE_RATE 119.0f
 //#define WHDEBUG
+
+
+
 unsigned long last_send_millis = 0;
 unsigned long microsPerReading, microsPrevious, microsNow;
 int roll, pitch, heading;
 
 float ax, ay, az;
 float gx, gy, gz;
+float wx, wy, wz;
 float mx, my, mz;
 char buff[64];
-
+float vx = 0;
 Madgwick filter;
+INS ins(119.0f);
+
+void speedUpdateHandler(BLEDevice dev, BLECharacteristic characteristic){
+  #ifdef WHDEBUG
+  Serial.print((char)*characteristic.value());
+  Serial.print((char)*(characteristic.value()+1));
+  Serial.print((int16_t)*(characteristic.value()+2));
+  Serial.println();
+  #endif
+  if((char)*characteristic.value() == '$'){
+    switch ((char)*(characteristic.value()+1)){
+      case 'V':
+      vx = 0.1f * (int16_t)*(characteristic.value()+2);
+      break;
+      case 'G':
+      ins.x(0, 0) = 0.01f * (int16_t)*(characteristic.value()+2);
+      ins.x(1, 0) = 0.0f;//0.001f * (int16_t)*(characteristic.value()+4);
+      ins.x(2, 0) = 0.01f * (int16_t)*(characteristic.value()+4);
+      ins.stepcount = 0;
+      break;
+
+    }
+    
+  }
+  
+}
+
 
 BLEHelpers::BLESerial bs(BLE);
 
@@ -31,7 +65,6 @@ void setup() {
   digitalWrite(LEDG, HIGH);
   delay(250);
   digitalWrite(LEDB, HIGH);
-
   #ifdef WHDEBUG
   Serial.begin(9600);
   while(!Serial);
@@ -54,7 +87,7 @@ void setup() {
     #endif
     while (1);
   }
-  
+  bs.RegisterRecieveCallback(speedUpdateHandler);
   filter.begin(AHRS_SAMPLE_RATE);
 
   microsPerReading = 1000000 / AHRS_SAMPLE_RATE;
@@ -72,35 +105,86 @@ void loop() {
     if(central.connected()){
       // disable blue led when connected
       digitalWrite(LEDB, HIGH);
+      ins.x(0, 0) = 0;
+      ins.x(1, 0) = 0;
+      ins.x(2, 0) = 0;
     }
+    microsPrevious = micros();
     while (central.connected()) {
       microsNow = micros();
       if (IMU.gyroscopeAvailable()) {
-        IMU.readGyroscope(gx, gy, gz);
+        IMU.readGyroscope(wx, wy, wz);
+        //convert to right handed ned system
+        wz *= -1;
       }
 
       if (IMU.accelerationAvailable()) {
         IMU.readAcceleration(ax, ay, az);
+        //convert to right-handed ned system
+        az += 0.015f;
+        az *= -1;
       }
 
       if (IMU.magneticFieldAvailable()) {
+        // something is wrong here
         IMU.readMagneticField(mx, my, mz);
+        mx -= 27.5f;
+        my -= 7.5f;
+        mz += 17.50f;
+        // convert to right handed ned system
+        mx *= -1;
+        mz *= -1;
       }
       if (microsNow - microsPrevious >= microsPerReading) {
-        filter.update(-gx, -gy, -gz, ax, ay, az, mx, my, mz);
+        //substract centripetal force
+        gx = -0.101936799f * ax;
+        gy = -0.101936799f * ay - vx * wz * 0.0174533f;
+        gz = -0.101936799f * az + vx * wy *  0.0174533f;
+        filter.update(wx, wy, wz, gx, gy, gz, -mx, -my, -mz);
+        float nax, nay, naz;
+        filter.RotateVector(ax, ay, az, nax, nay, naz);
+        //if(vx > 0){
+          ins.step(nax, nay, naz);
+        //}
         mx = 0;
         my = 0;
         mz = 0;
+        /*Serial.print(ins.x(0,0));
+        Serial.print("  ");
+        Serial.print(ins.x(1,0));
+        Serial.print("  ");
+        Serial.print(ins.x(2,0));
+        Serial.println();*/
 
         if(millis() - last_send_millis > BLE_REFRESH_TIME){
           // flash grenn led when transmitting
           digitalWrite(LEDG, LOW);
-          sprintf(buff, "$RPYL,%i,%i,%i,0,0,1,0\n", (int) filter.getRoll()*10, (int) filter.getPitch()*10,(int) filter.getYaw()*10);
+          //sprintf(buff, "$RPYL,%i,%i,%i,0,0,%i,0\n", (int) filter.getRoll()*10, (int) filter.getPitch()*10,(int) filter.getYaw()*10, (int)(1000.0f*az));
+          buff[0] = '$';
+          buff[1] = 'A';
+          int16_t roll = (int16_t) filter.getRoll()*10;
+          int16_t pitch = (int16_t) filter.getPitch()*10;
+          int16_t yaw = (int16_t) filter.getYaw()*10;
+          int16_t vx_ins = (int16_t) (sqrtf(ins.x(0,0) * ins.x(0,0) + ins.x(1,0) * ins.x(1,0)) *100);
+          int16_t vz_ins = ins.x(2, 0) * 100;
           
+          buff[2] = *((char*)&roll);
+          buff[3] = *((char*)&roll + 1);
+          buff[4] = *((char*)&pitch);
+          buff[5] = *((char*)&pitch + 1);
+          buff[6] = *((char*)&yaw);
+          buff[7] = *((char*)&yaw + 1);
+
+
+          buff[8] = *((char*)&vx_ins);
+          buff[9] = *((char*)&vx_ins + 1);
+          buff[10] = *((char*)&vz_ins);
+          buff[11] = *((char*)&vz_ins + 1);
+      
           #ifdef WHDEBUG
-          Serial.println(buff);
+          //Serial.println(buff);
           #endif
-          bs.write(buff, strlen(buff));
+          bs.write(buff, 12);
           last_send_millis = millis();
           digitalWrite(LEDG, HIGH);
         }
@@ -113,3 +197,4 @@ void loop() {
   #endif
   }
 }
+

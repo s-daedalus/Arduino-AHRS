@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "Nano-33-BLE-AHRS",
+			"path": "."
+		},
+		{
+			"name": "Tests",
+			"path": "..\\..\\..\\..\\Documents\\PlatformIO\\Projects\\Tests"
+		}
+	],
+	"settings": {}
+}

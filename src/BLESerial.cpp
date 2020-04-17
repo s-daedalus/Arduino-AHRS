@@ -4,7 +4,6 @@ using namespace BLEHelpers;
 
 BLESerial::BLESerial(BLELocalDevice & dev):
     dev(dev),
-    rcf_registered(false),
     rx_tx_characteristic(rx_tx_uuid, BLERead|BLEWrite|BLENotify, chunksize),
     service(service_uuid){}
 
@@ -17,6 +16,8 @@ bool BLESerial::begin(const char* name){
     dev.setAdvertisedService(service);
     service.addCharacteristic(rx_tx_characteristic);
     dev.addService(service);
+    // set conection interval to fastest supported value (7.5ms);
+    dev.setConnectionInterval(6,6);
     dev.advertise();
     return true;
 }
@@ -39,4 +40,9 @@ void BLESerial::write(void* data, size_t length){
 
 BLEDevice BLESerial::hasClient(){
     return dev.central();
+}
+
+void BLESerial::RegisterRecieveCallback(BLECharacteristicEventHandler eh){
+
+    rx_tx_characteristic.setEventHandler(BLEWritten, eh);
 }
