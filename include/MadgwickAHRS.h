@@ -69,7 +69,10 @@ public:
         if (!anglesComputed) computeAngles();
         return yaw;
     }
+
+
     void RotateVector(const float& x, const float& y, const float& z,float& x_out, float& y_out, float& z_out);
+    void RotateVectorBack(const float& x, const float& y, const float& z,float& x_out, float& y_out, float& z_out);
 };
 #endif
 

@@ -264,5 +264,24 @@ void Madgwick::RotateVector(const float& x, const float& y, const float& z,float
     x_out = x * (1 - 2 * (jj+kk)) + y * (ij2 -kw2)      + z * (ik2 + jw2);
     y_out = x * (ij2 + kw2)       + y * (1 - 2*(ii+kk)) + z * (jk2 - iw2);
     z_out = x * (ik2 - jw2)       + y * (jk2 + iw2)     + z * (1 - 2 * (ii + jj));
+}
 
+void Madgwick::RotateVectorBack(const float& x, const float& y, const float& z,float& x_out, float& y_out, float& z_out){
+	// use conjugate quaternion
+	// since all imaginary values are negated the product of two will stay the same.
+    float ii = q1*q1;
+    float jj = q2*q2;
+    float kk = q3*q3;
+    float ij2 = 2*q1*q2;
+    float ik2 = 2*q1*q3;
+    float jk2 = 2*q3*q2;
+
+	// only the product with the real part will switch sign
+    float iw2 = -2*q1*q0;
+    float jw2 = -2*q2*q0;
+    float kw2 = -2*q3*q0;
+
+    x_out = x * (1 - 2 * (jj+kk)) + y * (ij2 -kw2)      + z * (ik2 + jw2);
+    y_out = x * (ij2 + kw2)       + y * (1 - 2*(ii+kk)) + z * (jk2 - iw2);
+    z_out = x * (ik2 - jw2)       + y * (jk2 + iw2)     + z * (1 - 2 * (ii + jj));
 }
